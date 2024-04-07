@@ -75,9 +75,20 @@ def _get_network_decomposition(sample: Sample) -> Tuple[dict, list]:
     # Process sample id (for debugging purposes and for then evaluating the model)
     sample_file_path, sample_file_id = sample.get_sample_id()
     sample_file_name = sample_file_path.split("/")[-1]
+
+    nodes = list()
+    # nodes: one dimensional array, declares if the device is a router or a switch -> router = 0 and switch = 1
+    for node in network_topology.nodes:
+        if network_topology.nodes[node]["type"] == 'r':
+            nodes.append(0)
+        elif network_topology.nodes[node]["type"] == 's':
+            nodes.append(1)
+
+
     # Obtain links and nodes
     # We discard all links that start from the traffic generator
     links = dict()
+
     for edge in network_topology.edges:  # src, dst, port
         # We identify all traffic generators as the same port
         edge_id = sub(r"t(\d+)", "tg", network_topology.edges[edge]["port"])
@@ -183,6 +194,17 @@ def _get_network_decomposition(sample: Sample) -> Tuple[dict, list]:
                 ]
         path_to_link.append(local_list)
 
+    # Link_to_node
+    link_to_node = list()
+    for node_idx in range(len(nodes)):
+        local_list = list()
+        node_edges = network_topology.edges(node_idx,data=True)
+        for edge in node_edges:
+            link_id = edge[2]['port']
+            if link_id in used_links:
+                local_list.append(link_mapping[link_id])
+        link_to_node.append(local_list)
+
     # Many of the features must have expanded dimensions so they can be concatenated
     sample = (
         {
@@ -209,6 +231,11 @@ def _get_network_decomposition(sample: Sample) -> Tuple[dict, list]:
             # Topology attributes
             "link_to_path": tf.ragged.constant(link_to_path),
             "path_to_link": tf.ragged.constant(path_to_link, ragged_rank=1),
+            # Node attributes
+            "nodes": np.expand_dims(
+                [node for node in nodes], axis=1
+            ),
+            "link_to_node": tf.ragged.constant(link_to_node)
         },
         [flow["delay"] for flow in ordered_flows],
     )
@@ -246,6 +273,7 @@ def _generator(
         # SKIP SAMPLES WITH ZERO OR NEGATIVE VALUES
         if verify_delays and not all(x > 0 for x in ret[1]):
             continue
+        # Maks Stop
         yield ret
 
 
@@ -280,6 +308,12 @@ def input_fn(data_dir: str, shuffle: bool = False, verify_delays:bool = True) ->
             "link_to_path": tf.RaggedTensorSpec(shape=(None, None), dtype=tf.int32),
             "path_to_link": tf.RaggedTensorSpec(
                 shape=(None, None, 2), dtype=tf.int32, ragged_rank=1
+            ),
+            # Node attributes
+            "nodes": tf.TensorSpec(
+                shape=(None, 1), dtype=tf.int32),
+            "link_to_node": tf.RaggedTensorSpec(
+                shape=(None, None), dtype=tf.int32, ragged_rank=1
             ),
         },
         tf.TensorSpec(shape=None, dtype=tf.float32),

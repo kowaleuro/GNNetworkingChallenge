@@ -51,3 +51,11 @@ dmypy.json
 # Pyre type checker
 .pyre/
 .vscode/
+
+# Dataset
+/MB-Dataset
+
+/data/data_cbr_mb
+/data/data_cbr_mb_cv
+/data/data_mb
+/data/data_mb_cv
