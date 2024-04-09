@@ -295,6 +295,8 @@ class Baseline_mb(tf.keras.Model):
         # Przez jaki path przechodzi jaki node
         link_device_type = inputs["link_device_type"]
         link_device_type = tf.one_hot(link_device_type,depth=1)
+        node_to_link = inputs["node_to_link"]
+        node_to_path = inputs["node_to_path"]
 
 
         # Zbieramy ruch dla każdego path'a NA LINKU według średniego ABV flow'a
@@ -367,8 +369,20 @@ class Baseline_mb(tf.keras.Model):
             link_gather = tf.gather(link_state, link_to_path, name="LinkToPath")
             previous_path_state = path_state
             # stan node'a dodaje do path update jako drugi feature
+            device_gather = tf.gather(device_state, node_to_path)
+
+            link_device_gathered = tf.concat(
+            # device_type
+            # sumofalltheNodesState
+                [
+                    devices_encoded,
+                    device_gather
+                ],
+                axis=1
+            ),
+
             path_state_sequence, path_state = self.path_update(
-                link_gather, initial_state=path_state
+                link_device_gathered, initial_state=path_state
             )
             # We select the element in path_state_sequence so that it corresponds to the state before the link was considered
             path_state_sequence = tf.concat(
