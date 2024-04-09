@@ -231,7 +231,7 @@ class Baseline_mb(tf.keras.Model):
 
         self.link_embedding = tf.keras.Sequential(
             [
-                tf.keras.layers.Input(shape=2),
+                tf.keras.layers.Input(shape=3),
                 tf.keras.layers.Dense(
                     self.link_state_dim, activation=tf.keras.activations.relu
                 ),
@@ -240,6 +240,19 @@ class Baseline_mb(tf.keras.Model):
                 ),
             ],
             name="LinkEmbedding",
+        )
+
+        self.device_embedding = tf.keras.Sequential(
+            [
+                tf.keras.layers.Input(shape=2),
+                tf.keras.layers.Dense(
+                    self.link_state_dim, activation=tf.keras.activations.relu
+                ),
+                tf.keras.layers.Dense(
+                    self.link_state_dim, activation=tf.keras.activations.relu
+                ),
+            ],
+            name="DeviceEmbedding",
         )
 
         self.readout_path = tf.keras.Sequential(
@@ -279,6 +292,9 @@ class Baseline_mb(tf.keras.Model):
         # Maks - nodes
         nodes = inputs["nodes"]
         link_to_node = inputs["link_to_node"]
+        # Przez jaki path przechodzi jaki node
+        link_device_type = inputs["link_device_type"]
+        link_device_type = tf.one_hot(link_device_type,depth=1)
 
 
         # Zbieramy ruch dla każdego path'a NA LINKU według średniego ABV flow'a
@@ -311,18 +327,46 @@ class Baseline_mb(tf.keras.Model):
                     (link_capacity - self.min_max_scores["link_capacity"][0])
                     * self.min_max_scores["link_capacity"][1],
                     load,
+                    link_device_type
                 ],
                 axis=1,
             ),
         )
 
+        device_link_gather = tf.gather(link_state, link_to_node[:,:],batch_dims=0)
+
+        device_link_sum = tf.math.reduce_sum(device_link_gather, axis=1)
+
+        device_link_mean = tf.math.reduce_mean(device_link_sum, axis=1)
+
+        device_link_mean = tf.expand_dims(device_link_mean, axis=1)
+
+        devices_encoded = tf.squeeze(tf.one_hot(nodes,depth=1))
+
+        devices_encoded = tf.expand_dims(devices_encoded, axis=1)
+
+        # Initial hidden state of devices
+        device_state = self.device_embedding(
+            tf.concat(
+            # device_type
+            # sumofalltheNodesState
+                [
+                    devices_encoded,
+                    device_link_mean
+                ],
+                axis=1
+            ),
+        )
+
         # Iterate t times doing the message passing
         for _ in range(self.iterations):
+
             ####################
             #  LINKS TO PATH   #
             ####################
             link_gather = tf.gather(link_state, link_to_path, name="LinkToPath")
             previous_path_state = path_state
+            # stan node'a dodaje do path update jako drugi feature
             path_state_sequence, path_state = self.path_update(
                 link_gather, initial_state=path_state
             )
@@ -339,6 +383,13 @@ class Baseline_mb(tf.keras.Model):
             )
             path_sum = tf.math.reduce_sum(path_gather, axis=1)
             link_state, _ = self.link_update(path_sum, states=link_state)
+
+            ####################
+            #  NODES TO LINK   # node'y w zależności od linków
+            ####################
+
+
+            # device update
 
         ################
         #  READOUT     #

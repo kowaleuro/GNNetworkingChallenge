@@ -26,7 +26,8 @@ from typing import List, Optional, Union, Tuple, Dict, Any
 # Run eagerly-> Turn true for debugging only
 RUN_EAGERLY = True
 tf.config.run_functions_eagerly(RUN_EAGERLY)
-tf.data.experimental.enable_debug_mode()
+if RUN_EAGERLY:
+    tf.data.experimental.enable_debug_mode()
 
 
 def _reset_seeds(seed: int = 42) -> None:
@@ -77,7 +78,7 @@ def get_default_hyperparams() -> Dict[str, Any]:
         "loss": tf.keras.losses.MeanAbsolutePercentageError(),
         "metrics": [],
         "additional_callbacks": get_default_callbacks(),
-        "epochs": 1,
+        "epochs": 50,
     }
 
 
@@ -150,7 +151,7 @@ def train_and_evaluate(
     loss: tf.keras.losses.Loss,
     metrics: List[tf.keras.metrics.Metric],
     additional_callbacks: List[tf.keras.callbacks.Callback],
-    epochs: int = 1,
+    epochs: int = 50,
     ckpt_path: Optional[str] = None,
     tensorboard_path: Optional[str] = None,
     restore_ckpt: bool = False,
@@ -270,8 +271,6 @@ def train_and_evaluate(
         callbacks=[cpkt_callback, tensorboard_callback] + additional_callbacks,
         use_multiprocessing=True,
     )
-
-    tf.keras.utils.plot_model(model, show_shapes=True, to_file='model.png')
 
     if final_eval:
         return model, model.evaluate(ds_val)
