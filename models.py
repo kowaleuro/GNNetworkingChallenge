@@ -372,17 +372,17 @@ class Baseline_mb(tf.keras.Model):
             device_gather = tf.gather(device_state, node_to_path)
 
             link_device_gathered = tf.concat(
-            # device_type
-            # sumofalltheNodesState
                 [
-                    devices_encoded,
-                    device_gather
+                    tf.expand_dims(link_gather, axis=2),
+                    tf.expand_dims(device_gather, axis=2)
                 ],
-                axis=1
+                axis=2
             ),
 
+            link_device_sum = tf.math.reduce_sum(link_device_gathered[0],axis=2)
+
             path_state_sequence, path_state = self.path_update(
-                link_device_gathered, initial_state=path_state
+                link_device_sum, initial_state=path_state
             )
             # We select the element in path_state_sequence so that it corresponds to the state before the link was considered
             path_state_sequence = tf.concat(
