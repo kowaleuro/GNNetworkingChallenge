@@ -92,7 +92,7 @@ import tensorflow as tf
 #             ],
 #             name="PathReadout",
 #         )
-    
+
 #     def set_min_max_scores(self, override_min_max_scores):
 #         assert (
 #             type(override_min_max_scores) == dict
@@ -182,6 +182,7 @@ import tensorflow as tf
 #         delay = tf.math.reduce_sum(delay_sequence, axis=1)
 #         return delay
 
+
 class Baseline_mb(tf.keras.Model):
     min_max_scores_fields = {
         "flow_traffic",
@@ -216,9 +217,13 @@ class Baseline_mb(tf.keras.Model):
             self.link_state_dim, name="LinkUpdate"
         )
 
+        self.device_update = tf.keras.layers.GRUCell(
+            self.link_state_dim, name="DeviceUpdate"
+        )
+
         self.path_embedding = tf.keras.Sequential(
             [
-                tf.keras.layers.Input(shape=3),
+                tf.keras.layers.Input(shape=(3)),
                 tf.keras.layers.Dense(
                     self.path_state_dim, activation=tf.keras.activations.relu
                 ),
@@ -280,7 +285,9 @@ class Baseline_mb(tf.keras.Model):
     @tf.function
     def call(self, inputs):
         # Ensure that the min-max scores are set
-        assert self.min_max_scores is not None, "the model cannot be called before setting the min-max scores!"
+        assert (
+            self.min_max_scores is not None
+        ), "the model cannot be called before setting the min-max scores!"
 
         # Process raw inputs
         flow_traffic = inputs["flow_traffic"]
@@ -294,14 +301,13 @@ class Baseline_mb(tf.keras.Model):
         link_to_node = inputs["link_to_node"]
         # Przez jaki path przechodzi jaki node
         link_device_type = inputs["link_device_type"]
-        link_device_type = tf.one_hot(link_device_type,depth=1)
+        link_device_type = tf.one_hot(link_device_type, depth=1)
         node_to_link = inputs["node_to_link"]
         node_to_path = inputs["node_to_path"]
-
+        path_to_node = inputs["path_to_node"]
 
         # Zbieramy ruch dla każdego path'a NA LINKU według średniego ABV flow'a
         path_gather_traffic = tf.gather(flow_traffic, path_to_link[:, :, 0])
-
 
         # Zliczamy zsumowany load na linku
         load = tf.math.reduce_sum(path_gather_traffic, axis=1) / (link_capacity * 1e9)
@@ -321,7 +327,6 @@ class Baseline_mb(tf.keras.Model):
             )
         )
 
-
         # Initialize the initial hidden state for links
         link_state = self.link_embedding(
             tf.concat(
@@ -329,13 +334,13 @@ class Baseline_mb(tf.keras.Model):
                     (link_capacity - self.min_max_scores["link_capacity"][0])
                     * self.min_max_scores["link_capacity"][1],
                     load,
-                    link_device_type
+                    link_device_type,
                 ],
                 axis=1,
             ),
         )
 
-        device_link_gather = tf.gather(link_state, link_to_node[:,:],batch_dims=0)
+        device_link_gather = tf.gather(link_state, link_to_node[:, :], batch_dims=0)
 
         device_link_sum = tf.math.reduce_sum(device_link_gather, axis=1)
 
@@ -343,20 +348,17 @@ class Baseline_mb(tf.keras.Model):
 
         device_link_mean = tf.expand_dims(device_link_mean, axis=1)
 
-        devices_encoded = tf.squeeze(tf.one_hot(nodes,depth=1))
+        devices_encoded = tf.squeeze(tf.one_hot(nodes, depth=1))
 
         devices_encoded = tf.expand_dims(devices_encoded, axis=1)
 
         # Initial hidden state of devices
         device_state = self.device_embedding(
             tf.concat(
-            # device_type
-            # sumofalltheNodesState
-                [
-                    devices_encoded,
-                    device_link_mean
-                ],
-                axis=1
+                # device_type
+                # sumofalltheNodesState
+                [devices_encoded, device_link_mean],
+                axis=1,
             ),
         )
 
@@ -366,20 +368,24 @@ class Baseline_mb(tf.keras.Model):
             ####################
             #  LINKS TO PATH   #
             ####################
-            link_gather = tf.gather(link_state, link_to_path, name="LinkToPath")
+            link_gather_for_path = tf.gather(
+                link_state, link_to_path, name="LinkToPath"
+            )
             previous_path_state = path_state
             # stan node'a dodaje do path update jako drugi feature
-            device_gather = tf.gather(device_state, node_to_path)
+            device_gather_for_path = tf.gather(device_state, node_to_path)
 
-            link_device_gathered = tf.concat(
-                [
-                    tf.expand_dims(link_gather, axis=2),
-                    tf.expand_dims(device_gather, axis=2)
-                ],
-                axis=2
-            ),
+            link_device_gathered = (
+                tf.concat(
+                    [
+                        tf.expand_dims(link_gather_for_path, axis=2),
+                        tf.expand_dims(device_gather_for_path, axis=2),
+                    ],
+                    axis=2,
+                ),
+            )
 
-            link_device_sum = tf.math.reduce_sum(link_device_gathered[0],axis=2)
+            link_device_sum = tf.math.reduce_sum(link_device_gathered[0], axis=2)
 
             path_state_sequence, path_state = self.path_update(
                 link_device_sum, initial_state=path_state
@@ -392,16 +398,22 @@ class Baseline_mb(tf.keras.Model):
             ###################
             #   PATH TO LINK  #
             ###################
+
             path_gather = tf.gather_nd(
                 path_state_sequence, path_to_link, name="PathToRLink"
             )
-            path_sum = tf.math.reduce_sum(path_gather, axis=1)
-            link_state, _ = self.link_update(path_sum, states=link_state)
+            path_sum_link = tf.math.reduce_sum(path_gather, axis=1)
+            link_state, _ = self.link_update(path_sum_link, states=link_state)
 
             ####################
-            #  NODES TO LINK   # node'y w zależności od linków
+            #  NODES Update    # node'y w zależności od linków
             ####################
-
+            # test = tf.expand_dims(path_to_node, axis=2)
+            node_gather = tf.gather_nd(
+                path_state_sequence, path_to_node, name="PathToRNode"
+            )
+            path_sum_device = tf.math.reduce_sum(node_gather, axis=1)
+            device_state, _ = self.device_update(path_sum_device, states=device_state)
 
             # device update
 

@@ -24,7 +24,7 @@ import numpy as np
 from typing import List, Optional, Union, Tuple, Dict, Any
 
 # Run eagerly-> Turn true for debugging only
-RUN_EAGERLY = True
+RUN_EAGERLY = False
 tf.config.run_functions_eagerly(RUN_EAGERLY)
 if RUN_EAGERLY:
     tf.data.experimental.enable_debug_mode()
@@ -78,7 +78,7 @@ def get_default_hyperparams() -> Dict[str, Any]:
         "loss": tf.keras.losses.MeanAbsolutePercentageError(),
         "metrics": [],
         "additional_callbacks": get_default_callbacks(),
-        "epochs": 50,
+        "epochs": 15,
     }
 
 

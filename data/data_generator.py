@@ -79,11 +79,10 @@ def _get_network_decomposition(sample: Sample) -> Tuple[dict, list]:
     nodes = list()
     # nodes: one dimensional array, declares if the device is a router or a switch -> router = 0 and switch = 1
     for node in network_topology.nodes:
-        if network_topology.nodes[node]["type"] == 'r':
+        if network_topology.nodes[node]["type"] == "r":
             nodes.append(0)
-        elif network_topology.nodes[node]["type"] == 's':
+        elif network_topology.nodes[node]["type"] == "s":
             nodes.append(1)
-
 
     # Obtain links and nodes
     # We discard all links that start from the traffic generator
@@ -163,14 +162,41 @@ def _get_network_decomposition(sample: Sample) -> Tuple[dict, list]:
         ordered_links.append(link_params)
     n_l = len(ordered_links)
 
+    # Link_to_node
+    link_to_node = list()
+    node_type_to_link = list()
+    node_to_link = list()
+
+    for link_idx in range(n_l):
+        for node_idx, node_type in enumerate(nodes):
+            node_edges = network_topology.edges(node_idx, data=True)
+            for edge in node_edges:
+                edge_id = sub(r"t(\d+)", "tg", edge[2]["port"])
+                if edge_id in used_links:
+                    if link_idx is link_mapping[edge_id]:
+                        node_type_to_link.append(node_type)
+                        node_to_link.append(node_idx)
+                        break
+
+    for node_idx in range(len(nodes)):
+        local_list = list()
+        node_edges = network_topology.edges(node_idx, data=True)
+        for edge in node_edges:
+            link_id = sub(r"t(\d+)", "tg", edge[2]["port"])
+            if link_id in used_links:
+                local_list.append(link_mapping[link_id])
+        link_to_node.append(local_list)
+
     # Obtain list of indices representing the topology
     # link_to_path: two dimensional array, first dimension are the paths, second dimension are the link indices
     link_to_path = list()
+    node_to_path = list()
     # We define link_pos_in_flows that will later help us build path_to_link
     link_pos_in_flows = list()
     for og_path in map(lambda x: x["og_path"], ordered_flows):
         # This list will contain the link indices in the original path,in order
         local_list = list()
+        node_local_list = list()
         # This dict indicates for each link which are the positions in the original path, if any
         local_dict = dict()
         for link_id in og_path:
@@ -178,8 +204,10 @@ def _get_network_decomposition(sample: Sample) -> Tuple[dict, list]:
             link_idx = link_mapping[link_id]
             local_dict.setdefault(link_idx, list()).append(len(local_list))
             local_list.append(link_idx)
+            node_local_list.append(node_to_link[link_idx])
         link_to_path.append(local_list)
         link_pos_in_flows.append(local_dict)
+        node_to_path.append(node_local_list)
 
     # path_to_link: two dimensional array, first dimension are the links, second dimension are tuples.
     # Each tuple contains the path index and the link's position in the path
@@ -194,16 +222,12 @@ def _get_network_decomposition(sample: Sample) -> Tuple[dict, list]:
                 ]
         path_to_link.append(local_list)
 
-    # Link_to_node
-    link_to_node = list()
-    for node_idx in range(len(nodes)):
+    path_to_node = list()
+    for node_idx, node in enumerate(nodes):
         local_list = list()
-        node_edges = network_topology.edges(node_idx,data=True)
-        for edge in node_edges:
-            link_id = edge[2]['port']
-            if link_id in used_links:
-                local_list.append(link_mapping[link_id])
-        link_to_node.append(local_list)
+        for link in link_to_node[node_idx]:
+            local_list += [(path_idx, pos) for path_idx, pos in path_to_link[link]]
+        path_to_node.append(local_list)
 
     # Many of the features must have expanded dimensions so they can be concatenated
     sample = (
@@ -228,14 +252,18 @@ def _get_network_decomposition(sample: Sample) -> Tuple[dict, list]:
             "link_capacity": np.expand_dims(
                 [link["capacity"] for link in ordered_links], axis=1
             ),
+            "link_device_type": np.array(
+                [node_type_to_link[idx] for idx in range(n_l)]
+            ),
             # Topology attributes
             "link_to_path": tf.ragged.constant(link_to_path),
             "path_to_link": tf.ragged.constant(path_to_link, ragged_rank=1),
             # Node attributes
-            "nodes": np.expand_dims(
-                [node for node in nodes], axis=1
-            ),
-            "link_to_node": tf.ragged.constant(link_to_node)
+            "nodes": np.expand_dims([node for node in nodes], axis=1),
+            "link_to_node": tf.ragged.constant(link_to_node),
+            "node_to_link": np.expand_dims(node_to_link, axis=1),
+            "node_to_path": tf.ragged.constant(node_to_path),
+            "path_to_node": tf.ragged.constant(path_to_node, ragged_rank=1),
         },
         [flow["delay"] for flow in ordered_flows],
     )
@@ -277,7 +305,9 @@ def _generator(
         yield ret
 
 
-def input_fn(data_dir: str, shuffle: bool = False, verify_delays:bool = True) -> tf.data.Dataset:
+def input_fn(
+    data_dir: str, shuffle: bool = False, verify_delays: bool = True
+) -> tf.data.Dataset:
     """Returns a tf.data.Dataset object with the dataset stored in the given path
 
     Parameters
@@ -310,10 +340,17 @@ def input_fn(data_dir: str, shuffle: bool = False, verify_delays:bool = True) ->
                 shape=(None, None, 2), dtype=tf.int32, ragged_rank=1
             ),
             # Node attributes
-            "nodes": tf.TensorSpec(
-                shape=(None, 1), dtype=tf.int32),
+            "link_device_type": tf.TensorSpec(shape=(None), dtype=tf.int32),
+            "nodes": tf.TensorSpec(shape=(None, 1), dtype=tf.int32),
             "link_to_node": tf.RaggedTensorSpec(
                 shape=(None, None), dtype=tf.int32, ragged_rank=1
+            ),
+            "node_to_link": tf.TensorSpec(shape=(None, 1), dtype=tf.int32),
+            "node_to_path": tf.RaggedTensorSpec(
+                shape=(None, None), dtype=tf.int32, ragged_rank=1
+            ),
+            "path_to_node": tf.RaggedTensorSpec(
+                shape=(None, None, 2), dtype=tf.int32, ragged_rank=1
             ),
         },
         tf.TensorSpec(shape=None, dtype=tf.float32),
