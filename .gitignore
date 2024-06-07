@@ -57,8 +57,8 @@ dmypy.json
 
 # /data/data_cbr_mb
 # /data/data_cbr_mb_cv
-/data/data_mb
-/data/data_mb_cv
+# /data/data_mb
+# /data/data_mb_cv
 /data/test_data
 /gnnet-ch23-test-dataset-with-labels
 .tmp.driveupload/
