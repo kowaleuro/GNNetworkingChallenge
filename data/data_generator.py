@@ -137,6 +137,11 @@ def _get_network_decomposition(sample: Sample) -> Tuple[dict, list]:
                     "AvgDelay"
                 ]
                 * 1000,  # in ms
+                "jitter": performance_matrix[src, dst]["Flows"][local_flow_id]["Jitter"]
+                * 1000,  # in ms
+                "PktsDrop": performance_matrix[src, dst]["Flows"][local_flow_id][
+                    "PktsDrop"
+                ],
             }
 
             # Add edges to the used_links set
@@ -266,6 +271,8 @@ def _get_network_decomposition(sample: Sample) -> Tuple[dict, list]:
             "path_to_node": tf.ragged.constant(path_to_node, ragged_rank=1),
         },
         [flow["delay"] for flow in ordered_flows],
+        [flow["jitter"] for flow in ordered_flows],
+        # [flow["PktsDrop"] for flow in ordered_flows],
     )
 
     return sample
@@ -354,6 +361,8 @@ def input_fn(
             ),
         },
         tf.TensorSpec(shape=None, dtype=tf.float32),
+        tf.TensorSpec(shape=None, dtype=tf.float32),
+        # tf.TensorSpec(shape=None, dtype=tf.float32),
     )
 
     ds = tf.data.Dataset.from_generator(
