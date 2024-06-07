@@ -270,7 +270,7 @@ def _get_network_decomposition(sample: Sample) -> Tuple[dict, list]:
             "node_to_path": tf.ragged.constant(node_to_path),
             "path_to_node": tf.ragged.constant(path_to_node, ragged_rank=1),
         },
-        [flow["delay"] for flow in ordered_flows],
+        # [flow["delay"] for flow in ordered_flows],
         [flow["jitter"] for flow in ordered_flows],
         # [flow["PktsDrop"] for flow in ordered_flows],
     )
@@ -361,7 +361,7 @@ def input_fn(
             ),
         },
         tf.TensorSpec(shape=None, dtype=tf.float32),
-        tf.TensorSpec(shape=None, dtype=tf.float32),
+        # tf.TensorSpec(shape=None, dtype=tf.float32),
         # tf.TensorSpec(shape=None, dtype=tf.float32),
     )
 
