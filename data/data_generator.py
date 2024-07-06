@@ -136,7 +136,15 @@ def _get_network_decomposition(sample: Sample) -> Tuple[dict, list]:
                 "delay": performance_matrix[src, dst]["Flows"][local_flow_id][
                     "AvgDelay"
                 ]
-                * 1000,  # in ms
+                * 1000,
+                  # in ms
+                "Jitter": performance_matrix[src, dst]["Flows"][local_flow_id][
+                    "Jitter"
+                ]
+                * 1000,
+                "PktsDrop": performance_matrix[src, dst]["Flows"][local_flow_id][
+                    "PktsDrop"
+                ],    
             }
 
             # Add edges to the used_links set
@@ -265,7 +273,11 @@ def _get_network_decomposition(sample: Sample) -> Tuple[dict, list]:
             "node_to_path": tf.ragged.constant(node_to_path),
             "path_to_node": tf.ragged.constant(path_to_node, ragged_rank=1),
         },
-        [flow["delay"] for flow in ordered_flows],
+        (
+            [flow["delay"] for flow in ordered_flows],
+            [flow["Jitter"] for flow in ordered_flows],
+            [flow["PktsDrop"] for flow in ordered_flows],
+        )
     )
 
     return sample
@@ -299,7 +311,7 @@ def _generator(
     for sample in iter(tool):
         ret = _get_network_decomposition(sample)
         # SKIP SAMPLES WITH ZERO OR NEGATIVE VALUES
-        if verify_delays and not all(x > 0 for x in ret[1]):
+        if verify_delays and not all(x > 0 for x in ret[1][0]):
             continue
         # Maks Stop
         yield ret
@@ -353,7 +365,11 @@ def input_fn(
                 shape=(None, None, 2), dtype=tf.int32, ragged_rank=1
             ),
         },
-        tf.TensorSpec(shape=None, dtype=tf.float32),
+        (
+            tf.TensorSpec(shape=None, dtype=tf.float32),
+            tf.TensorSpec(shape=None, dtype=tf.float32),
+            tf.TensorSpec(shape=None, dtype=tf.float32),
+        )
     )
 
     ds = tf.data.Dataset.from_generator(
